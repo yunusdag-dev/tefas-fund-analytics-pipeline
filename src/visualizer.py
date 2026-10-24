@@ -1,20 +1,213 @@
 """
-Interactive Financial Visualization & Dashboard Builder using Plotly.
+Interactive Financial & RFM Visualization Suite using Plotly.
 
-Generates an interactive 4-panel HTML dashboard (`reports/tefas_dashboard.html`)
-containing:
-1. Cumulative Return Curves (%) across TEFAS Funds
-2. Risk-Return Scatter (Annualized Volatility vs. Annualized Return, sized by AUM, colored by Sharpe)
-3. Historical Drawdown (Underwater) Curves (%)
-4. Investor Portfolio Performance by Risk Profile
+Generates:
+1. RFM Segment Distribution Charts:
+   - Interactive Treemap (`reports/figures/rfm_segments_treemap.html`)
+   - Interactive Donut Chart (`reports/figures/rfm_segments_donut.html`)
+2. Monetary (Harcama/Yatırım) vs. Recency (Yenilik) Scatter Plot colored by RFM Segment:
+   - (`reports/figures/rfm_monetary_vs_recency_scatter.html`)
+3. 4-Panel TEFAS Executive Dashboard (`reports/tefas_dashboard.html`)
 """
 
 from pathlib import Path
+from typing import Dict
 import pandas as pd
+import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from config.settings import BASE_DIR
+
+FIGURES_DIR = BASE_DIR / "reports" / "figures"
+
+
+def create_rfm_treemap(
+    rfm_df: pd.DataFrame,
+    output_dir: Path | None = FIGURES_DIR,
+) -> go.Figure:
+    """
+    Build an interactive Plotly Treemap showing RFM Segment distribution
+    (sized by investor count and colored by average Monetary value).
+    Saves the chart to `reports/figures/rfm_segments_treemap.html` if output_dir is provided.
+    """
+    seg_summary = (
+        rfm_df.groupby(["rfm_segment", "risk_profile"], as_index=False)
+        .agg(
+            investor_count=("investor_id", "count"),
+            total_monetary_try=("monetary_try", "sum"),
+            avg_monetary_try=("monetary_try", "mean"),
+            avg_recency_days=("recency_days", "mean"),
+        )
+    )
+    seg_summary["avg_monetary_try"] = seg_summary["avg_monetary_try"].round(2)
+    seg_summary["avg_recency_days"] = seg_summary["avg_recency_days"].round(1)
+
+    fig = px.treemap(
+        seg_summary,
+        path=[px.Constant("Tüm Yatırımcılar"), "rfm_segment", "risk_profile"],
+        values="investor_count",
+        color="avg_monetary_try",
+        color_continuous_scale="Tealgrn",
+        custom_data=["total_monetary_try", "avg_monetary_try", "avg_recency_days"],
+        title="<b>RFM Segmentlerinin ve Risk Profillerinin Dağılımı (Treemap)</b>",
+    )
+    fig.update_traces(
+        hovertemplate=(
+            "<b>%{label}</b><br>"
+            "Yatırımcı Sayısı: %{value}<br>"
+            "Toplam Hacim (Monetary): %{customdata[0]:,.2f} TL<br>"
+            "Ortalama Hacim: %{customdata[1]:,.2f} TL<br>"
+            "Ortalama Recency: %{customdata[2]:.1f} gün<extra></extra>"
+        )
+    )
+    fig.update_layout(
+        template="plotly_white",
+        height=600,
+        margin=dict(t=60, l=25, r=25, b=25),
+        coloraxis_colorbar=dict(title="Ort. Monetary (TL)"),
+    )
+
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        fig.write_html(str(output_dir / "rfm_segments_treemap.html"), include_plotlyjs="cdn")
+
+    return fig
+
+
+def create_rfm_donut_chart(
+    rfm_df: pd.DataFrame,
+    output_dir: Path | None = FIGURES_DIR,
+) -> go.Figure:
+    """
+    Build an interactive Plotly Donut Chart showing RFM Segment distribution.
+    Saves the chart to `reports/figures/rfm_segments_donut.html` if output_dir is provided.
+    """
+    seg_counts = (
+        rfm_df.groupby("rfm_segment", as_index=False)
+        .agg(
+            investor_count=("investor_id", "count"),
+            total_monetary_try=("monetary_try", "sum"),
+        )
+        .sort_values("investor_count", ascending=False)
+    )
+
+    fig = go.Figure(
+        data=[
+            go.Pie(
+                labels=seg_counts["rfm_segment"],
+                values=seg_counts["investor_count"],
+                hole=0.48,
+                textinfo="label+percent",
+                customdata=seg_counts["total_monetary_try"],
+                hovertemplate=(
+                    "<b>%{label}</b><br>"
+                    "Yatırımcı Sayısı: %{value} (%{percent})<br>"
+                    "Toplam Hacim (Monetary): %{customdata:,.2f} TL<extra></extra>"
+                ),
+            )
+        ]
+    )
+    fig.update_layout(
+        title=dict(
+            text="<b>RFM Segmentlerinin Yatırımcı Dağılımı (Donut Chart)</b>",
+            x=0.5,
+        ),
+        template="plotly_white",
+        height=550,
+        annotations=[
+            dict(
+                text=f"<b>Toplam<br>{len(rfm_df)}<br>Yatırımcı</b>",
+                x=0.5,
+                y=0.5,
+                font_size=15,
+                showarrow=False,
+            )
+        ],
+    )
+
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        fig.write_html(str(output_dir / "rfm_segments_donut.html"), include_plotlyjs="cdn")
+
+    return fig
+
+
+def create_rfm_scatter_plot(
+    rfm_df: pd.DataFrame,
+    output_dir: Path | None = FIGURES_DIR,
+) -> go.Figure:
+    """
+    Build an interactive Plotly Scatter Plot of Monetary (Harcama/Yatırım Hacmi)
+    vs. Recency (Yenilik - Gün), colored by RFM Segment and sized by Frequency.
+    Saves the chart to `reports/figures/rfm_monetary_vs_recency_scatter.html` if output_dir is provided.
+    """
+    fig = px.scatter(
+        rfm_df,
+        x="recency_days",
+        y="monetary_try",
+        color="rfm_segment",
+        size="frequency",
+        hover_name="full_name",
+        hover_data={
+            "investor_id": True,
+            "city": True,
+            "risk_profile": True,
+            "recency_days": True,
+            "frequency": True,
+            "monetary_try": ":,.2f",
+            "rfm_score": True,
+        },
+        labels={
+            "recency_days": "Recency (Son İşlemden Bu Yana Geçen Gün)",
+            "monetary_try": "Monetary — Toplam Harcama / İşlem Hacmi (TL)",
+            "rfm_segment": "RFM Segmenti",
+            "frequency": "Frequency (İşlem Sayısı)",
+        },
+        title="<b>Monetary (Harcama) vs. Recency (Yenilik) Dağılımı — RFM Segmentlerine Göre</b>",
+        size_max=22,
+        opacity=0.85,
+    )
+    fig.update_layout(
+        template="plotly_white",
+        height=620,
+        legend=dict(
+            title="RFM Segmentleri",
+            orientation="v",
+            yanchor="top",
+            y=1.0,
+            xanchor="left",
+            x=1.02,
+        ),
+    )
+
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        fig.write_html(
+            str(output_dir / "rfm_monetary_vs_recency_scatter.html"),
+            include_plotlyjs="cdn",
+        )
+
+    return fig
+
+
+def export_all_rfm_figures(
+    rfm_df: pd.DataFrame,
+    output_dir: Path = FIGURES_DIR,
+) -> Dict[str, Path]:
+    """
+    Generate and save all RFM interactive figures under `reports/figures/`.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    create_rfm_treemap(rfm_df, output_dir=output_dir)
+    create_rfm_donut_chart(rfm_df, output_dir=output_dir)
+    create_rfm_scatter_plot(rfm_df, output_dir=output_dir)
+
+    return {
+        "treemap": output_dir / "rfm_segments_treemap.html",
+        "donut": output_dir / "rfm_segments_donut.html",
+        "scatter": output_dir / "rfm_monetary_vs_recency_scatter.html",
+    }
 
 
 def build_tefas_dashboard(
@@ -25,11 +218,6 @@ def build_tefas_dashboard(
 ) -> Path:
     """
     Create and export a 4-panel interactive Plotly HTML dashboard for TEFAS analytics.
-
-    Returns
-    -------
-    Path
-        Path to the generated HTML dashboard file.
     """
     if output_path is None:
         reports_dir = BASE_DIR / "reports"
@@ -54,7 +242,6 @@ def build_tefas_dashboard(
         "#ea580c", "#0891b2", "#ca8a04", "#4f46e5",
     ]
 
-    # Panel 1 & Panel 3: Cumulative Return and Drawdown per fund
     for idx, (code, group) in enumerate(enriched_funds_df.groupby("fund_code")):
         color = palette[idx % len(palette)]
         group = group.sort_values("date")
@@ -88,7 +275,6 @@ def build_tefas_dashboard(
             col=1,
         )
 
-    # Panel 2: Risk-Return Scatter
     fig.add_trace(
         go.Scatter(
             x=risk_metrics_df["annualized_volatility_pct"],
@@ -116,7 +302,6 @@ def build_tefas_dashboard(
         col=2,
     )
 
-    # Panel 4: Investor Risk Profile Grouped Bar Chart
     fig.add_trace(
         go.Bar(
             x=risk_profile_summary_df["risk_profile"],

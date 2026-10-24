@@ -12,9 +12,10 @@ from src.loader import get_db_engine, load_tables_to_db, run_sql_analytics
 from src.transformer import (
     calculate_fund_risk_metrics,
     calculate_investor_portfolios,
+    calculate_rfm_segments,
     clean_and_enrich_funds,
 )
-from src.visualizer import build_tefas_dashboard
+from src.visualizer import build_tefas_dashboard, export_all_rfm_figures
 from src.pipeline import run_etl_pipeline
 
 
@@ -254,11 +255,35 @@ def test_plotly_dashboard_generation(tmp_path) -> None:
 
 
 def test_full_etl_orchestrator_end_to_end() -> None:
-    """Verify full run_etl_pipeline orchestrator produces DB tables, SQL reports, and HTML dashboard."""
+    """Verify full run_etl_pipeline orchestrator produces DB tables, SQL reports, HTML dashboard, and RFM figures."""
     res = run_etl_pipeline(try_live_api=False)
     assert res["dashboard_path"].exists()
+    assert res["rfm_figure_paths"]["treemap"].exists()
+    assert res["rfm_figure_paths"]["donut"].exists()
+    assert res["rfm_figure_paths"]["scatter"].exists()
     assert res["loaded_counts"]["tefas_daily_prices"] == 2016
     assert res["loaded_counts"]["investor_portfolios"] == 300
+
+
+def test_rfm_segmentation_and_figures(tmp_path) -> None:
+    """Verify RFM score/segment calculation and Plotly Treemap, Donut, and Scatter export."""
+    funds_df = simulate_tefas_fund_history(n_days=30, seed=42)
+    investors_df = generate_investors(n_investors=40, seed=42)
+    tx_df = generate_transactions(investors_df, funds_df, n_transactions=200, seed=42)
+
+    rfm_df = calculate_rfm_segments(investors_df, tx_df)
+    assert not rfm_df.empty
+    assert {"recency_days", "frequency", "monetary_try", "rfm_score", "rfm_segment"}.issubset(
+        set(rfm_df.columns)
+    )
+    assert (rfm_df["recency_days"] >= 1).all()
+    assert (rfm_df["monetary_try"] > 0).all()
+
+    paths = export_all_rfm_figures(rfm_df, output_dir=tmp_path)
+    for fig_path in paths.values():
+        assert fig_path.exists()
+        assert fig_path.stat().st_size > 1000
+
 
 
 

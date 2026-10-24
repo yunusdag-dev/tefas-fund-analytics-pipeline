@@ -24,9 +24,10 @@ from src.loader import get_db_engine, load_tables_to_db, run_sql_analytics
 from src.transformer import (
     calculate_fund_risk_metrics,
     calculate_investor_portfolios,
+    calculate_rfm_segments,
     clean_and_enrich_funds,
 )
-from src.visualizer import build_tefas_dashboard
+from src.visualizer import build_tefas_dashboard, export_all_rfm_figures
 
 logging.basicConfig(
     level=logging.INFO,
@@ -56,10 +57,11 @@ def run_etl_pipeline(
         seed=seed,
     )
 
-    logger.info("2/4 [TRANSFORM] Finansal risk metrikleri (Sharpe, Sortino, Drawdown) ve PnL hesaplanıyor...")
+    logger.info("2/4 [TRANSFORM] Finansal risk metrikleri (Sharpe, Sortino, Drawdown), PnL ve RFM hesaplanıyor...")
     enriched_funds_df = clean_and_enrich_funds(raw_funds_df)
     risk_metrics_df = calculate_fund_risk_metrics(enriched_funds_df)
     portfolios_df = calculate_investor_portfolios(investors_df, transactions_df, enriched_funds_df)
+    rfm_df = calculate_rfm_segments(investors_df, transactions_df)
 
     if save_csv:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -68,6 +70,7 @@ def run_etl_pipeline(
         investors_df.to_csv(DATA_DIR / "investors.csv", index=False)
         transactions_df.to_csv(DATA_DIR / "transactions.csv", index=False)
         portfolios_df.to_csv(DATA_DIR / "investor_portfolios.csv", index=False)
+        rfm_df.to_csv(DATA_DIR / "investor_rfm_segments.csv", index=False)
         logger.info("CSV veri setleri '%s' dizinine kaydedildi.", DATA_DIR)
 
     logger.info("3/4 [LOAD] Tablolar SQLAlchemy ile veritabanına (%s) yazılıyor...", db_url)
@@ -82,14 +85,15 @@ def run_etl_pipeline(
     )
     logger.info("Veritabanına yüklenen satır sayıları: %s", loaded_counts)
 
-    logger.info("4/4 [SQL ANALYTICS & DASHBOARD] Analitik SQL sorguları ve Plotly Dashboard üretiliyor...")
+    logger.info("4/4 [SQL ANALYTICS & VISUALIZATION] SQL sorguları, Dashboard ve RFM Grafikleri üretiliyor...")
     sql_reports = run_sql_analytics(engine)
     dashboard_path = build_tefas_dashboard(
         enriched_funds_df=enriched_funds_df,
         risk_metrics_df=risk_metrics_df,
         risk_profile_summary_df=sql_reports["risk_profile_summary"],
     )
-    logger.info("İnteraktif Plotly Dashboard hazır: %s", dashboard_path)
+    rfm_figure_paths = export_all_rfm_figures(rfm_df)
+    logger.info("İnteraktif Plotly Dashboard ve RFM grafikleri hazır: %s", rfm_figure_paths)
 
     return {
         "enriched_funds": enriched_funds_df,
@@ -97,9 +101,11 @@ def run_etl_pipeline(
         "investors": investors_df,
         "transactions": transactions_df,
         "portfolios": portfolios_df,
+        "rfm": rfm_df,
         "loaded_counts": loaded_counts,
         "sql_reports": sql_reports,
         "dashboard_path": dashboard_path,
+        "rfm_figure_paths": rfm_figure_paths,
     }
 
 

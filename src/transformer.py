@@ -224,3 +224,96 @@ def calculate_investor_portfolios(
     )
 
     return portfolio_df.sort_values("current_portfolio_value_try", ascending=False).reset_index(drop=True)
+
+
+def calculate_rfm_segments(
+    investors_df: pd.DataFrame,
+    transactions_df: pd.DataFrame,
+    reference_date: pd.Timestamp | None = None,
+) -> pd.DataFrame:
+    """
+    Compute RFM (Recency, Frequency, Monetary) scores (1-5) and assign behavioral
+    RFM segments for each investor based on transaction history.
+
+    Parameters
+    ----------
+    investors_df : pd.DataFrame
+        Investor master table.
+    transactions_df : pd.DataFrame
+        Transactions table containing transaction_date, total_amount_try, transaction_id.
+    reference_date : pd.Timestamp | None
+        Snapshot date for Recency calculation (defaults to max transaction_date + 1 day).
+
+    Returns
+    -------
+    pd.DataFrame
+        Investor RFM table with recency_days, frequency, monetary_try,
+        r_score, f_score, m_score, rfm_score, and rfm_segment.
+    """
+    tx = transactions_df.copy()
+    tx["transaction_date"] = pd.to_datetime(tx["transaction_date"]).dt.normalize()
+
+    if reference_date is None:
+        reference_date = tx["transaction_date"].max() + pd.Timedelta(days=1)
+
+    rfm = (
+        tx.groupby("investor_id", as_index=False)
+        .agg(
+            last_tx_date=("transaction_date", "max"),
+            frequency=("transaction_id", "count"),
+            monetary_try=("total_amount_try", "sum"),
+        )
+    )
+    rfm["recency_days"] = (reference_date - rfm["last_tx_date"]).dt.days
+    rfm["monetary_try"] = np.round(rfm["monetary_try"], 2)
+
+    # Merge with investors so every investor with transactions has demographic metadata
+    merged = investors_df[
+        ["investor_id", "full_name", "city", "risk_profile"]
+    ].merge(rfm, on="investor_id", how="inner")
+
+    # Compute quintile scores (1 to 5) using rank to avoid duplicate bin edge errors
+    # Lower recency_days -> higher r_score (5 is most recent)
+    merged["r_score"] = pd.qcut(
+        merged["recency_days"].rank(method="first", ascending=False),
+        q=5,
+        labels=[1, 2, 3, 4, 5],
+    ).astype(int)
+
+    merged["f_score"] = pd.qcut(
+        merged["frequency"].rank(method="first", ascending=True),
+        q=5,
+        labels=[1, 2, 3, 4, 5],
+    ).astype(int)
+
+    merged["m_score"] = pd.qcut(
+        merged["monetary_try"].rank(method="first", ascending=True),
+        q=5,
+        labels=[1, 2, 3, 4, 5],
+    ).astype(int)
+
+    merged["rfm_score"] = (
+        merged["r_score"].astype(str)
+        + merged["f_score"].astype(str)
+        + merged["m_score"].astype(str)
+    )
+
+    def _assign_segment(row: pd.Series) -> str:
+        r, f, m = int(row["r_score"]), int(row["f_score"]), int(row["m_score"])
+        if r >= 4 and f >= 4 and m >= 4:
+            return "Champions (Şampiyonlar)"
+        if r >= 3 and f >= 4:
+            return "Loyal Investors (Sadık Yatırımcılar)"
+        if m >= 4 and r >= 3:
+            return "Big Spenders (Yüksek Hacimliler)"
+        if r >= 4 and f <= 3:
+            return "Recent / Potential (Yeni & Potansiyel)"
+        if r == 3 and f <= 3:
+            return "Need Attention (İlgi Bekleyenler)"
+        if r <= 2 and (f >= 3 or m >= 3):
+            return "At Risk (Risk Altındakiler)"
+        return "Hibernating (Uykuda Olanlar)"
+
+    merged["rfm_segment"] = merged.apply(_assign_segment, axis=1)
+    return merged.sort_values("monetary_try", ascending=False).reset_index(drop=True)
+

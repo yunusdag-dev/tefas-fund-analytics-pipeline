@@ -3,9 +3,9 @@
 ![Python](https://img.shields.io/badge/Python-3.12-blue.svg)
 ![SQLAlchemy](https://img.shields.io/badge/Database-PostgreSQL%20%7C%20SQLite-336791.svg)
 ![Plotly](https://img.shields.io/badge/Visualization-Plotly-3F4F75.svg)
-![Tests](https://img.shields.io/badge/Tests-pytest%207%2F7%20passing-brightgreen.svg)
+![Tests](https://img.shields.io/badge/Tests-pytest%209%2F9%20passing-brightgreen.svg)
 
-Türkiye Elektronik Fon Alım Satım Platformu (**TEFAS**) bünyesinde işlem gören yatırım fonlarının günlük performans/risk metriklerini (**Sharpe Oranı, Sortino Oranı, Yıllıklandırılmış Volatilite, Maksimum Düşüş / Max Drawdown**) hesaplayan ve `Faker` ile üretilen Türk yatırımcı profillerinin portföy kar/zarar (**PnL & ROI**) analizini uçtan uca gerçekleştiren **Python 3.12 Veri Mühendisliği (ETL) ve Finansal Analitik** projesidir.
+Türkiye Elektronik Fon Alım Satım Platformu (**TEFAS**) bünyesinde işlem gören yatırım fonlarının günlük performans/risk metriklerini (**Sharpe Oranı, Sortino Oranı, Yıllıklandırılmış Volatilite, Maksimum Düşüş / Max Drawdown**) hesaplayan ve `Faker` ile üretilen Türk yatırımcı profillerinin **RFM (Recency, Frequency, Monetary)** segmentasyonu ile portföy kar/zarar (**PnL & ROI**) analizini uçtan uca gerçekleştiren **Python 3.12 Veri Mühendisliği (ETL) ve Finansal Analitik** projesidir.
 
 ---
 
@@ -27,7 +27,11 @@ data_engineering_project/
 ├── tests/
 │   └── test_pipeline.py       # 7 kapsamlı birim ve veritabanı entegrasyon testi (pytest)
 ├── reports/
-│   └── tefas_dashboard.html   # İnteraktif Plotly finansal analitik paneli
+│   ├── tefas_dashboard.html                         # 4 panelli ana finansal dashboard
+│   └── figures/
+│       ├── rfm_segments_treemap.html                # RFM Segmentleri Treemap grafiği
+│       ├── rfm_segments_donut.html                  # RFM Segmentleri Donut grafiği
+│       └── rfm_monetary_vs_recency_scatter.html     # Monetary vs Recency Scatter plot
 ├── .github/workflows/ci.yml   # GitHub Actions otomatik test ve pipeline CI akışı
 └── requirements.txt           # Proje bağımlılıkları
 ```
